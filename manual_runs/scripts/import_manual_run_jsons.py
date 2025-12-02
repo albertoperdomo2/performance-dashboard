@@ -36,45 +36,38 @@ def process_benchmark_section(
     """
     full_model_name = f"{accelerator}-{model_name}-{tp_size}"
 
-    profile_args = benchmark_run.get("args", {}).get("profile", {})
-    uuid = benchmark_run.get("run_id")
+    config = benchmark_run.get("config", {})
+    uuid = config.get("run_id")
 
-    request_loader = benchmark_run.get("request_loader", {})
-    request_data_str = request_loader.get("data", "{}")
+    requests_config = config.get("requests", {})
+    request_data_str = requests_config.get("data", "")
 
-    try:
-        request_config = json.loads(request_data_str)
-        config_prompt_tokens = request_config.get("prompt_tokens", 0)
-        config_output_tokens = request_config.get("output_tokens", 0)
-    except (json.JSONDecodeError, KeyError):
-        config_prompt_tokens = 0
-        config_output_tokens = 0
+    # Parse format like "['prompt_tokens=1000,output_tokens=1000']"
+    config_prompt_tokens = 0
+    config_output_tokens = 0
+    if request_data_str:
+        data_str = request_data_str.strip("'\"[]")
+        for part in data_str.split(","):
+            if "prompt_tokens=" in part:
+                config_prompt_tokens = int(part.split("=")[1])
+            elif "output_tokens=" in part:
+                config_output_tokens = int(part.split("=")[1])
 
-    streams = profile_args.get("streams", [])
-    measured_rates = profile_args.get("measured_rates", [])
-    measured_concurrencies = profile_args.get("measured_concurrencies", [])
-
-    if (
-        benchmark_index < len(streams)
-        and benchmark_index < len(measured_rates)
-        and benchmark_index < len(measured_concurrencies)
-    ):
-        intended_concurrency = streams[benchmark_index]
-        measured_rps = measured_rates[benchmark_index]
-        measured_concurrency = measured_concurrencies[benchmark_index]
-    else:
-        intended_concurrency = streams[0] if streams else None
-        measured_rps = measured_rates[0] if measured_rates else None
-        measured_concurrency = (
-            measured_concurrencies[0] if measured_concurrencies else None
-        )
-
-    run_stats = benchmark_run.get("run_stats", {})
-    requests_made = run_stats.get("requests_made", {})
-    successful_reqs = requests_made.get("successful", 0)  # nosec B113
-    errored_reqs = requests_made.get("errored", 0)  # nosec B113
+    strategy = config.get("strategy", {})
+    intended_concurrency = strategy.get("streams") or strategy.get("max_concurrency")
 
     metrics = benchmark_run.get("metrics", {})
+
+    request_concurrency_metrics = metrics.get("request_concurrency", {}).get("successful", {})
+    measured_concurrency = request_concurrency_metrics.get("mean")
+
+    requests_per_second_metrics = metrics.get("requests_per_second", {}).get("successful", {})
+    measured_rps = requests_per_second_metrics.get("mean")
+
+    scheduler_metrics = benchmark_run.get("scheduler_metrics", {})
+    requests_made = scheduler_metrics.get("requests_made", {})
+    successful_reqs = requests_made.get("successful", 0)  # nosec B113
+    errored_reqs = requests_made.get("errored", 0)  # nosec B113
 
     output_tps_metrics = metrics.get("output_tokens_per_second", {}).get(
         "successful", {}
